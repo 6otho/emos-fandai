@@ -175,7 +175,7 @@ async function handleLandingPage(request, ctx) {
   const clientIP = request.headers.get("CF-Connecting-IP") || "Unknown";
   const country = request.cf?.country || "N/A"; 
   const colo = request.cf?.colo || "N/A";
-  const city = request.cf?.city || "Unknown Location";
+  const city = request.cf?.city || "Unknown Location"; 
   
   const ua = request.headers.get("User-Agent") || "";
   let device = "Other";
@@ -184,8 +184,16 @@ async function handleLandingPage(request, ctx) {
   else if (ua.includes("Firefox")) device = "Firefox";
   else if (ua.includes("Edge")) device = "Edge";
 
-  // 后端内核极速测速 (回归 10ms 左右的骨干网成绩)
   let pingMs = 0;
+  let posters = [];
+  const fallbackPosters = [
+    "https://image.tmdb.org/t/p/w500/A4BtcBvP1B2b4k5K68W2h0bEY1v.jpg", "https://image.tmdb.org/t/p/w500/8cdWjvZQUrmdDO7Sl3Xh0E8v9eB.jpg",
+    "https://image.tmdb.org/t/p/w500/vSNxAJTlD0r02V9sPYpOjqDZXUK.jpg", "https://image.tmdb.org/t/p/w500/7WsyChQLEftFiDOVTGkv3hFpyyt.jpg",
+    "https://image.tmdb.org/t/p/w500/rCzpDGLbOoPwLjy3OAm5NUPOTrC.jpg", "https://image.tmdb.org/t/p/w500/qJ2tW6WMUDux911r6m7haRef0WH.jpg",
+    "https://image.tmdb.org/t/p/w500/d5iIlFn5s0ImszYzBPbOYKQzzzS.jpg", "https://image.tmdb.org/t/p/w500/u3bZgnGQ9T01sWNhyveQz0wH0Hl.jpg",
+    "https://image.tmdb.org/t/p/w500/xXhKkGk8E1w7pM1n8u4019aX09.jpg", "https://image.tmdb.org/t/p/w500/z0G7AARbWc3W172h3B3oYIweBq7.jpg",
+  ];
+
   const pingTask = (async () => {
     const startPing = Date.now();
     try {
@@ -197,34 +205,25 @@ async function handleLandingPage(request, ctx) {
     pingMs = Date.now() - startPing;
   })();
 
-  // 抓取海报
-  let posters = [];
-  const fallbackPosters = [
-    "https://image.tmdb.org/t/p/w500/A4BtcBvP1B2b4k5K68W2h0bEY1v.jpg", "https://image.tmdb.org/t/p/w500/8cdWjvZQUrmdDO7Sl3Xh0E8v9eB.jpg",
-    "https://image.tmdb.org/t/p/w500/vSNxAJTlD0r02V9sPYpOjqDZXUK.jpg", "https://image.tmdb.org/t/p/w500/7WsyChQLEftFiDOVTGkv3hFpyyt.jpg",
-    "https://image.tmdb.org/t/p/w500/rCzpDGLbOoPwLjy3OAm5NUPOTrC.jpg", "https://image.tmdb.org/t/p/w500/qJ2tW6WMUDux911r6m7haRef0WH.jpg",
-    "https://image.tmdb.org/t/p/w500/d5iIlFn5s0ImszYzBPbOYKQzzzS.jpg", "https://image.tmdb.org/t/p/w500/u3bZgnGQ9T01sWNhyveQz0wH0Hl.jpg",
-    "https://image.tmdb.org/t/p/w500/xXhKkGk8E1w7pM1n8u4019aX09.jpg", "https://image.tmdb.org/t/p/w500/z0G7AARbWc3W172h3B3oYIweBq7.jpg",
-  ];
-
-  try {
-    const tmdbHeaders = { "accept": "application/json" };
-    if (TMDB_API_KEY.length > 50) tmdbHeaders["Authorization"] = `Bearer ${TMDB_API_KEY}`;
-    const tmdbResp = await Promise.race([
-      fetch('https://api.themoviedb.org/3/trending/all/day?language=zh-CN', { headers: tmdbHeaders }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 1000))
-    ]);
-    if (tmdbResp.ok) {
-      const data = await tmdbResp.json();
-      posters = data.results.filter(i => i.poster_path).map(i => `https://image.tmdb.org/t/p/w500${i.poster_path}`);
-    }
-  } catch(e) {}
+  const tmdbTask = (async () => {
+    try {
+      const tmdbHeaders = { "accept": "application/json" };
+      if (TMDB_API_KEY.length > 50) tmdbHeaders["Authorization"] = `Bearer ${TMDB_API_KEY}`;
+      const tmdbResp = await Promise.race([
+        fetch('https://api.themoviedb.org/3/trending/all/day?language=zh-CN', { headers: tmdbHeaders }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 1000))
+      ]);
+      if (tmdbResp.ok) {
+        const data = await tmdbResp.json();
+        posters = data.results.filter(i => i.poster_path).map(i => `https://image.tmdb.org/t/p/w500${i.poster_path}`);
+      }
+    } catch(e) {}
+  })();
 
   await Promise.allSettled([pingTask, tmdbTask]);
 
   if (posters.length < 8) posters = fallbackPosters;
 
-  // 满屏 6 排海报生成
   const shuffle = (arr) => arr.sort(() => 0.5 - Math.random());
   const row1 = shuffle([...posters, ...posters]).slice(0, 15);
   const row2 = shuffle([...posters, ...posters]).slice(0, 15);
@@ -239,7 +238,6 @@ async function handleLandingPage(request, ctx) {
   if (pingMs > 80) pingColor = "text-yellow-500";
   if (pingMs > 200) pingColor = "text-red-500";
 
-  // 根据 country 判断网络状态文本
   const networkStatusText = country === 'CN' ? '本地直连网络' : '全球代理网络';
   const networkBadgeColor = country === 'CN' ? 'bg-green-600/80 text-green-100' : 'bg-purple-600/80 text-purple-100';
 
@@ -249,10 +247,12 @@ async function handleLandingPage(request, ctx) {
   <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>EMOS 媒体库 | ${PROXY_NAME}</title>
+      <title>emos 聚合反代 | ${PROXY_NAME}</title>
+      <!-- 添加专属网页标签图标 (Favicon) -->
+      <link rel="icon" type="image/png" href="https://upicon.iknn.eu.org/admin/emospg(1)-emby_1772994874075.png">
       <script src="https://cdn.tailwindcss.com"></script>
       <style>
-          @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Noto+Sans+SC:wght@300;500;700;900&display=swap');
+          @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;500;700;900&display=swap');
           
           body { 
               background-color: #141414; 
@@ -293,16 +293,13 @@ async function handleLandingPage(request, ctx) {
           .netflix-red { color: #E50914; }
           .bg-netflix-red { background-color: #E50914; }
           
-          /* 加大卡片圆角 (rounded-2xl) */
           .nf-card {
               background: rgba(24, 24, 24, 0.7);
               border: 1px solid rgba(255, 255, 255, 0.1);
-              border-radius: 1.5rem; /* 24px 圆角 */
+              border-radius: 1.5rem; 
               padding: 1.5rem; 
               backdrop-filter: blur(10px);
           }
-
-          .logo-font { font-family: 'Bebas Neue', cursive; letter-spacing: 2px; }
       </style>
   </head>
   <body class="antialiased min-h-screen flex flex-col items-center justify-center relative px-4">
@@ -321,7 +318,8 @@ async function handleLandingPage(request, ctx) {
 
       <div class="w-full max-w-5xl z-10">
           <header class="mb-12 flex flex-col items-center text-center">
-              <h1 class="logo-font text-6xl md:text-8xl netflix-red mb-2 drop-shadow-2xl">EMOS</h1>
+              <!-- 这里去掉了大写字体类，并使用了 tracking-tighter 让小写字母排列更紧凑好看 -->
+              <h1 class="text-7xl md:text-8xl font-black netflix-red mb-2 drop-shadow-2xl tracking-tighter">emos</h1>
               <h2 class="text-3xl md:text-5xl font-black mb-4 tracking-wider">海量影视，无界畅享。</h2>
               <p class="text-xl text-gray-300 font-light">私有云媒体智能代理节点已就绪。</p>
           </header>
@@ -388,9 +386,19 @@ async function handleLandingPage(request, ctx) {
               </div>
           </div>
 
-          <footer class="mt-16 text-center text-sm text-gray-600 border-t border-gray-800 pt-6">
-              <p class="mb-2">基于 Cloudflare 边缘计算强力驱动</p>
-              <p>Node Maintainer: <span class="text-gray-400">${PROXY_NAME}</span> &copy; ${currentYear}</p>
+          <!-- 页脚 -->
+          <footer class="mt-16 text-center border-t border-gray-800 pt-8 pb-4 flex flex-col items-center">
+              
+              <!-- 官方 Wiki 链接按钮 -->
+              <a href="https://wiki.emos.best/" target="_blank" class="mb-6 group flex items-center justify-center space-x-2 bg-gray-800/50 hover:bg-gray-700/80 border border-gray-700 hover:border-gray-500 transition-all duration-300 rounded-full px-5 py-2 backdrop-blur-sm cursor-pointer shadow-lg hover:shadow-[0_0_15px_rgba(255,255,255,0.1)]">
+                  <svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477-4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+                  </svg>
+                  <span class="text-sm font-bold text-gray-300 group-hover:text-white transition-colors tracking-widest">emos 官方 Wiki</span>
+              </a>
+
+              <p class="text-xs text-gray-600 mb-2 tracking-widest uppercase">基于 Cloudflare 边缘计算强力驱动</p>
+              <p class="text-xs text-gray-500 tracking-wider">Node Maintainer: <span class="text-gray-400 font-bold">${PROXY_NAME}</span> &copy; ${currentYear}</p>
           </footer>
       </div>
   </body>
